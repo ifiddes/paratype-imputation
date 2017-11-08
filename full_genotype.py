@@ -24,6 +24,7 @@ def parse_args():
     parser.add_argument('--save-pileup', help='Path to save pileup to')
     parser.add_argument('--features', required=True, help='Features file. Must have column names in the format <genome>_<paralog><#>')
     parser.add_argument('--read-pseudo', default=10, type=float)
+    parser.add_argument('--deviance-mask-cutoff', default=0.025, type=float, help='Percent of most deviant sites to mask')
     parser.add_argument('--ratio-plot')
     parser.add_argument('--deviance-plot')
     parser.add_argument('--name')
@@ -90,16 +91,17 @@ def construct_C(inferred_copy_numbers, filtered_features):
 def calculate_paratype_pseudo(inferred_copy_numbers, filtered_features):
     feature_groups = calculate_feature_groups(inferred_copy_numbers, filtered_features)
     # construct pseudocounts bsaed on the features
-    ambig=[]
-    ab=np.sum(filtered_features[feature_groups['AB']],axis=1)
-    c=np.sum(filtered_features[feature_groups['C']],axis=1)
-    d=np.sum(filtered_features[feature_groups['D']],axis=1)
-    n=np.sum(filtered_features[feature_groups['N']],axis=1)
+    ab=np.sum(filtered_features[feature_groups['AB']], axis=1)
+    c=np.sum(filtered_features[feature_groups['C']], axis=1)
+    d=np.sum(filtered_features[feature_groups['D']], axis=1)
+    n=np.sum(filtered_features[feature_groups['N']], axis=1)
 
-    not_ambig = ((ab>0) & (c==0) & (d==0) & (n==0)) | ((ab==0) & (c>0) & (d==0) & (n==0)) | ((ab==0) & (c==0) & (d>0) & (n==0)) | ((ab==0) & (c==0) & (d==0) & (n>0))
-    ambig = ~(((ab>0) & (c==0) & (d==0) & (n==0)) | ((ab==0) & (c>0) & (d==0) & (n==0)) | ((ab==0) & (c==0) & (d>0) & (n==0)) | ((ab==0) & (c==0) & (d==0) & (n>0)))
+    not_ambig = ((ab>0) & (c==0) & (d==0) & (n==0)) | \
+                ((ab==0) & (c>0) & (d==0) & (n==0)) | \
+                ((ab==0) & (c==0) & (d>0) & (n==0)) | \
+                ((ab==0) & (c==0) & (d==0) & (n>0))
 
-    paratype_pseudo = np.asarray(1 - 0.99 * not_ambig)
+    paratype_pseudo = np.array([0.01 if x else 1 for x in not_ambig])
     return paratype_pseudo
 
 
@@ -128,34 +130,35 @@ def calculate_variance(deviance, filtered_data):
     return sum(np.multiply(deviance, deviance)) / len(filtered_data['coverage'])
 
 
-def reject_deviance_outliers(deviance, percent=0.1):
-    """Rejects percent of lowest deviance values, returns the worst"""
+def reject_deviance_outliers(deviance, deviance_mask_cutoff):
+    """Rejects deviance_mask_cutoff of lowest deviance values, returns the worst"""
     s = len(deviance)
-    d = int(round(percent * s))
+    d = int(round(deviance_mask_cutoff * s))
     indices = deviance.argsort()[:d]
     return indices
 
 
-def calculate_mask(S, filtered_data):
+def calculate_mask(S, filtered_data, deviance_mask_cutoff):
     """Constructs the masking matrix based on deviance"""
     masked = []
-    for s in S.T:
+    for s in S:
         deviance = calculate_deviance(s, filtered_data)
-        to_mask = set(reject_deviance_outliers(deviance))
+        to_mask = set(reject_deviance_outliers(deviance, deviance_mask_cutoff))
         mask = [0 if x in to_mask else 1 for x in range(len(s))]
         masked.append(mask)
-    return np.array(masked).T
+    return np.array(masked)
 
 
-def calculate_values(filtered_features, C, paratype_pseudo, read_pseudo):
-    """Calculate S and the vector R. If mask is not None, will mask S_log and S_inv with it"""
+def calculate_values(filtered_features, C, paratype_pseudo, read_pseudo, deviance_mask_cutoff):
+    """Calculate S and the vector R."""
     Ct = C.T
 
     num = np.dot(filtered_features, Ct)
-    denom = np.sum(Ct, axis=0)[0]
-    paratype_pseudo += denom
+    denom = np.sum(Ct[:,0])  # first column -- all columns sum to total number of copies
+    #paratype_pseudo += denom
+    denom = [denom] * len(paratype_pseudo) + paratype_pseudo
     S = (paratype_pseudo + num.T) / ( (2.0 * paratype_pseudo) + denom)
-    S = S.T
+    #S = S.T
 
     #num = np.dot(filtered_features, Ct)
     #denom = np.sum(Ct, axis=0)
@@ -164,16 +167,16 @@ def calculate_values(filtered_features, C, paratype_pseudo, read_pseudo):
     S_log = np.log(S)
     S_inv = np.log(1 - S)
     # calculate the masking matrix based on deviance
-    S_mask = calculate_mask(S, filtered_data)
+    S_mask = calculate_mask(S, filtered_data, deviance_mask_cutoff)
     # mask these matrices
     S = np.multiply(S, S_mask)
     S_log = np.multiply(S_log, S_mask)
-    S_inv = np.multiply(S_log, S_mask)
+    S_inv = np.multiply(S_inv, S_mask)
 
     # M is the number of alt reads, N is the number of ref reads
     M = 1.0 * filtered_data.alt_count
     N = 1.0 * filtered_data.ref_count
-    R = (np.dot(M + read_pseudo, S_log) + np.dot(N + read_pseudo, S_inv))
+    R = (np.dot(M + read_pseudo, S_log.T) + np.dot(N + read_pseudo, S_inv.T)).T
     return S, R
 
 
@@ -216,7 +219,7 @@ if __name__ == '__main__':
         C = construct_C(args.inferred_copy_numbers, filtered_features)
 
     paratype_pseudo = calculate_paratype_pseudo(args.inferred_copy_numbers, filtered_features)
-    S, R = calculate_values(filtered_features, C, paratype_pseudo, args.read_pseudo)
+    S, R = calculate_values(filtered_features, C, paratype_pseudo, args.read_pseudo, args.deviance_mask_cutoff)
 
     R_map = {i: x for i, x in enumerate(R)}
     best_index, score = sorted(R_map.iteritems(), key=lambda x: x[1])[-1]
@@ -228,7 +231,7 @@ if __name__ == '__main__':
             if args.real_genotype is not None:
                 real_genome = np.array(map(int, args.real_genotype))
                 index = np.where(np.all(C == real_genome, axis=1))[0][0]
-                deviance = calculate_deviance(S.T[index], filtered_data)
+                deviance = calculate_deviance(S[index], filtered_data)
                 variance = calculate_variance(deviance, filtered_data)
                 fig, ax = plt.subplots()
                 ax.plot(deviance.index, deviance)
@@ -242,7 +245,7 @@ if __name__ == '__main__':
 
             for i in xrange(1, 4, 1):
                 index = ordered[i][0]
-                deviance = calculate_deviance(S.T[index], filtered_data)
+                deviance = calculate_deviance(S[index], filtered_data)
                 variance = calculate_variance(deviance, filtered_data)
                 fig, ax = plt.subplots()
                 ax.plot(deviance.index, deviance)

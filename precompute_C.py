@@ -18,7 +18,6 @@ def parse_args():
     parser.add_argument('-n', help="Maximum number of haplotypes", default=10, type=int)
     parser.add_argument('--features', required=True)
     parser.add_argument('--output', required=True)
-    parser.add_argument('--paratype-pseudo', default=0.1, type=float)
     parser.add_argument('--inferred-copy-numbers', nargs=4, default=['4', '2', '2', '2'])
     return parser.parse_args()
 
