@@ -27,6 +27,7 @@ def parse_args():
     parser.add_argument('--ratio-plot')
     parser.add_argument('--deviance-plot')
     parser.add_argument('--name')
+    parser.add_argument('--blacklist')
     parser.add_argument('--precomputed-C', help='precomputed C pickle. Must match inferred copy number.')
     parser.add_argument('--inferred-copy-numbers', default=['4', '2', '2', '2'], nargs=4,
                         help='Space delimited list of copy numbers in the order AB C D N')
@@ -124,7 +125,7 @@ def randomize_histogram(deviance):
 
 
 def calculate_variance(deviance, filtered_data):
-    return  sum(np.multiply(deviance, deviance)) / len(filtered_data['coverage'])
+    return sum(np.multiply(deviance, deviance)) / len(filtered_data['coverage'])
 
 
 def reject_deviance_outliers(deviance, percent=0.1):
@@ -149,21 +150,25 @@ def calculate_mask(S, filtered_data):
 def calculate_values(filtered_features, C, paratype_pseudo, read_pseudo):
     """Calculate S and the vector R. If mask is not None, will mask S_log and S_inv with it"""
     Ct = C.T
+
     num = np.dot(filtered_features, Ct)
     denom = np.sum(Ct, axis=0)[0]
     paratype_pseudo += denom
-
     S = (paratype_pseudo + num.T) / ( (2.0 * paratype_pseudo) + denom)
     S = S.T
+
+    #num = np.dot(filtered_features, Ct)
+    #denom = np.sum(Ct, axis=0)
+    #S = (1 + num) / (2.0 * 1 + denom)
 
     S_log = np.log(S)
     S_inv = np.log(1 - S)
     # calculate the masking matrix based on deviance
-    #S_mask = calculate_mask(S, filtered_data)
+    S_mask = calculate_mask(S, filtered_data)
     # mask these matrices
-    #S = np.multiply(S, S_mask)
-    #S_log = np.multiply(S_log, S_mask)
-    #S_inv = np.multiply(S_log, S_mask)
+    S = np.multiply(S, S_mask)
+    S_log = np.multiply(S_log, S_mask)
+    S_inv = np.multiply(S_log, S_mask)
 
     # M is the number of alt reads, N is the number of ref reads
     M = 1.0 * filtered_data.alt_count
@@ -192,6 +197,10 @@ if __name__ == '__main__':
     filtered_data = data[data['loc'].isin(positions)]
     # filter features too
     filtered_features = features[features.index.isin(positions)]
+
+    if args.blacklist is not None:
+        blacklist = map(int, [x.rstrip() for x in open(args.blacklist)])
+        filtered_features = filtered_features[~filtered_features.index.isin(positions)]
 
     # subset features by position if requested
     if args.feature_window is not None:
