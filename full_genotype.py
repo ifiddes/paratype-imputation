@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument('--save-pileup', help='Path to save pileup to')
     parser.add_argument('--features', required=True, help='Features file. Must have column names in the format <genome>_<paralog><#>')
     parser.add_argument('--read-pseudo', default=10, type=float)
-    parser.add_argument('--deviance-mask-cutoff', default=0.025, type=float, help='Percent of most deviant sites to mask')
+    parser.add_argument('--deviance-mask-cutoff', default=0.0025, type=float, help='Percent of most deviant sites to mask')
     parser.add_argument('--ratio-plot')
     parser.add_argument('--deviance-plot')
     parser.add_argument('--name')
