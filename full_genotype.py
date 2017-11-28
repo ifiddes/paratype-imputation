@@ -149,14 +149,13 @@ def calculate_mask(S, filtered_data, deviance_mask_cutoff):
     return np.array(masked)
 
 
-def calculate_values(filtered_features, C, paratype_pseudo, read_pseudo, deviance_mask_cutoff):
+def calculate_values(filtered_features, filtered_data, C, paratype_pseudo, read_pseudo, deviance_mask_cutoff):
     """Calculate S and the vector R."""
     Ct = C.T
 
     num = np.dot(filtered_features, Ct)
     denom = np.sum(Ct[:,0])  # first column -- all columns sum to total number of copies
-    #paratype_pseudo += denom
-    denom = [denom] * len(paratype_pseudo) + paratype_pseudo
+    denom = [denom] * len(paratype_pseudo)
     S = (paratype_pseudo + num.T) / ( (2.0 * paratype_pseudo) + denom)
     #S = S.T
 
@@ -219,7 +218,8 @@ if __name__ == '__main__':
         C = construct_C(args.inferred_copy_numbers, filtered_features)
 
     paratype_pseudo = calculate_paratype_pseudo(args.inferred_copy_numbers, filtered_features)
-    S, R = calculate_values(filtered_features, C, paratype_pseudo, args.read_pseudo, args.deviance_mask_cutoff)
+    S, R = calculate_values(filtered_features, filtered_data, C, paratype_pseudo, args.read_pseudo,
+                            args.deviance_mask_cutoff)
 
     R_map = {i: x for i, x in enumerate(R)}
     best_index, score = sorted(R_map.iteritems(), key=lambda x: x[1])[-1]
